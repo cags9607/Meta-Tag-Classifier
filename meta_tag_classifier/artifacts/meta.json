@@ -1,1 +1,9 @@
-
+{
+  "embedding_model": "distiluse-base-multilingual-cased-v2",
+  "pipeline_filename": "20250823_svm_7cat.pkl",
+  "pipeline_format": "pickle",
+  "version": "0.1.1",
+  "created_at": "2025-10-14T00:00:00",
+  "classes_": [],
+  "best_params": {}
+}
