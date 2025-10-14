@@ -33,6 +33,3 @@ include = ["meta_tag_classifier*"]
 
 [project.scripts]
 mtc = "meta_tag_classifier.cli:main"
-
-[tool.setuptools.package-data]
-"meta_tag_classifier" = ["py.typed"]
