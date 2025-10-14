@@ -253,24 +253,35 @@ class Predictor:
         """
         Predict for a DataFrame.
         If `text_col` is provided, uses it directly; otherwise auto-cleans raw meta fields to `selected_text`.
-        Returns a DataFrame with `selected_text`, `predicted_label`, `predicted_proba`, and passes through `target_domain` if present.
+        Returns a DataFrame with `selected_text`, `predicted_label`, `predicted_proba`,
+        and passes through `target_domain` if present.
         """
         if text_col is None or text_col not in df.columns:
             proc = clean_dataframe(df.copy())
-            proc = proc[proc["selected_text"].notna() & (proc["selected_text"] != "")].copy()
-            texts = proc["selected_text"].tolist()
             out = proc[["selected_text"]].copy()
             if "target_domain" in proc.columns:
                 out.insert(0, "target_domain", proc["target_domain"])
         else:
-            texts = df[text_col].fillna("").tolist()
             out = df[[text_col]].rename(columns={text_col: "selected_text"}).copy()
             if "target_domain" in df.columns:
                 out.insert(0, "target_domain", df["target_domain"])
 
+        # Mask non-empty texts
+        mask = out["selected_text"].fillna("").astype(str).str.strip() != ""
+        if not mask.any():
+            # Nothing to predict; return NaNs with same shape
+            out["predicted_label"] = np.nan
+            out["predicted_proba"] = np.nan
+            return out
+
+        texts = out.loc[mask, "selected_text"].tolist()
         preds, proba = self.predict_texts(texts)
-        out["predicted_label"] = preds
-        out["predicted_proba"] = proba
+
+        # Initialize with NaNs, then fill only where we predicted
+        out["predicted_label"] = np.nan
+        out["predicted_proba"] = np.nan
+        out.loc[mask, "predicted_label"] = preds
+        out.loc[mask, "predicted_proba"] = proba
         return out
 
 
