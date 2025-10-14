@@ -20,14 +20,12 @@ dependencies = [
   "torch",
 ]
 
+[tool.setuptools]
+packages = { find = { include = ["scripts*"] } }
+
 [project.scripts]
 mtc = "meta_tag_classifier.cli:main"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [tool.setuptools.package-data]
 "meta_tag_classifier" = ["py.typed"]
