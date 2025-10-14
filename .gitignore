@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# data & models
+/data/**
+!/data/.gitkeep
+/models/**
+!/models/.gitkeep
+/logs/**
+!/logs/.gitkeep
+
+*.ipynb_checkpoints/
