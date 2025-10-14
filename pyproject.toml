@@ -21,11 +21,18 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = { find = { include = ["scripts*", "meta_tag_classifier*"] } }
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["meta_tag_classifier*"]
+
+[tool.setuptools.package-data]
+"meta_tag_classifier" = ["py.typed", "artifacts/*"]
 
 [project.scripts]
 mtc = "meta_tag_classifier.cli:main"
-
 
 [tool.setuptools.package-data]
 "meta_tag_classifier" = ["py.typed"]
