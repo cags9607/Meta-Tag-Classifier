@@ -1,0 +1,20 @@
+# Paths
+raw_data: data/raw/train.csv
+clean_data: data/processed/train_clean.csv
+artifacts_dir: models/artifacts
+text_column: selected_text
+label_column: label
+
+# Embedding model
+embedding:
+  model_name: distiluse-base-multilingual-cased-v2
+
+# Model
+model:
+  type: linear_svc
+  C_grid: [0.0001, 0.001, 0.01, 0.1, 1.0]
+
+# Train
+train:
+  test_size: 0.2
+  random_state: 42
