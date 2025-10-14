@@ -23,22 +23,27 @@ from .data.clean import clean_metas
 from .data.ingest import long_to_wide_meta
 from .utils import ensure_dir  # simple mkdir helper
 
+
 # -------------------------- Embedding cache & utils --------------------------
 
 _model_cache: Dict[str, SentenceTransformer] = {}
 
+
 def _get_embedder(model_name: str) -> SentenceTransformer:
+    """Get (and cache) a SentenceTransformer embedder."""
     m = _model_cache.get(model_name)
     if m is None:
         m = SentenceTransformer(model_name)
         _model_cache[model_name] = m
     return m
 
+
 def embed_texts(
     texts: Iterable[str],
     model_name: str = "distiluse-base-multilingual-cased-v2",
     show_progress_bar: bool = True,
 ) -> np.ndarray:
+    """Encode texts into embeddings using SentenceTransformers."""
     model = _get_embedder(model_name)
     embs = model.encode(
         list(texts),
@@ -46,6 +51,7 @@ def embed_texts(
         convert_to_numpy=True,
     )
     return embs
+
 
 # ------------------------------ Cleaning wrapper -----------------------------
 
@@ -66,6 +72,7 @@ def clean_dataframe(
         short_title_word_threshold=short_title_word_threshold,
     )
 
+
 # ---------------------------- Training (optional) ----------------------------
 
 @dataclass
@@ -78,6 +85,7 @@ class TrainResult:
     pipeline_filename: str = "pipeline.pkl"
     pipeline_format: str = "pickle"  # "pickle" or "joblib"
 
+
 def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "pickle" or path.suffix.lower() == ".pkl":
@@ -87,6 +95,7 @@ def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
         import joblib
         joblib.dump(obj, path)
 
+
 def train(
     df: pd.DataFrame,
     label_column: str,
@@ -95,9 +104,14 @@ def train(
     C_grid: Optional[List[float]] = None,
     test_size: float = 0.2,
     random_state: int = 42,
-    pipeline_filename: str = "pipeline.pkl",
-    pipeline_format: str = "pickle",
+    pipeline_filename: str = "pipeline.pkl",     # default to .pkl
+    pipeline_format: str = "pickle",             # "pickle" or "joblib"
 ) -> TrainResult:
+    """
+    Clean/select text, embed with SentenceTransformers, then train:
+      StandardScaler -> PCA(0.95) -> LinearSVC (GridSearch on C, f1_macro)
+    Saves pipeline + meta to `artifacts_dir`.
+    """
     if C_grid is None:
         C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0]
 
@@ -158,38 +172,54 @@ def train(
         pipeline_format=pipeline_format,
     )
 
+
 # --------------------- Packaged-artifacts loading helpers --------------------
 
 def _packaged_artifacts_dir() -> Path | Any:
+    """
+    Locate artifacts bundled inside the installed package:
+      meta_tag_classifier/artifacts/{meta.json, pipeline.*}
+    Returns a Traversable or a materialized Path via as_file().
+    """
     try:
         return files("meta_tag_classifier") / "artifacts"
     except Exception:
         return Path(__file__).resolve().parent / "artifacts"
 
+
 def _load_pipeline_any(path: Path, fmt: Optional[str] = None) -> Any:
+    """
+    Load a pipeline saved as pickle (.pkl) or joblib (.joblib/.pkl),
+    preferring 'fmt' when provided, otherwise infer from suffix.
+    """
     suffix = path.suffix.lower()
     if fmt == "pickle" or suffix == ".pkl":
         with open(path, "rb") as f:
             return pickle.load(f)
+    # Else fallback to joblib
     import joblib
     return joblib.load(path)
+
 
 # ----------------------------- softmax for margins ---------------------------
 
 def _rowwise_softmax(m: np.ndarray) -> np.ndarray:
-    # numerical-stable softmax along axis=1
+    """Numerically stable softmax along axis=1."""
     z = m - m.max(axis=1, keepdims=True)
     np.exp(z, out=z)
     z_sum = z.sum(axis=1, keepdims=True)
     z /= z_sum
     return z
 
-# Fallback composer for selected_text if cleaner yields empty
+
+# -------------- Fallbacks for composing selected_text when empty -------------
+
 _FALLBACK_FIELDS = [
     "title", "og:title", "twitter:title",
     "description", "og:description", "twitter:description",
     "meta_description"
 ]
+
 def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
     def pick(row):
         for c in _FALLBACK_FIELDS:
@@ -199,6 +229,7 @@ def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
         return ""
     return df.apply(pick, axis=1)
 
+
 def _ensure_wide(df: pd.DataFrame) -> pd.DataFrame:
     """
     If input is long-format (has 'name' & 'content_latest'), pivot to wide and
@@ -206,14 +237,13 @@ def _ensure_wide(df: pd.DataFrame) -> pd.DataFrame:
     Otherwise pass through (ensuring those columns exist).
     """
     if {"name", "content_latest", "target_domain"}.issubset(df.columns):
-        wide = long_to_wide_meta(df)
-        return wide
-    # ensure required columns exist for the cleaner
+        return long_to_wide_meta(df)
     out = df.copy()
     for col in ["title_meta", "description_meta", "target_domain"]:
         if col not in out.columns:
             out[col] = ""
     return out
+
 
 # --------------------------------- Predictor ---------------------------------
 
@@ -256,7 +286,7 @@ class Predictor:
         """
         base = df.copy()
 
-        # 1) If no explicit text_col, prepare wide schema + run cleaner
+        # 1) Prepare text to embed
         if text_col is None or text_col not in base.columns:
             wide = _ensure_wide(base)
             proc = clean_dataframe(wide)
@@ -268,16 +298,17 @@ class Predictor:
             if empty_mask.any():
                 out.loc[empty_mask, "selected_text"] = _fallback_selected_text(wide.loc[empty_mask])
         else:
-            # user-provided text column
             out = base[[text_col]].rename(columns={text_col: "selected_text"}).copy()
             if "target_domain" in base.columns:
                 out.insert(0, "target_domain", base["target_domain"])
 
         # 2) Predict only for non-empty texts; keep all rows in output
         mask = out["selected_text"].fillna("").astype(str).str.strip() != ""
-        out["predicted_label"] = np.nan
-        out["predicted_proba"] = np.nan
-        out["proba_pseudo"] = np.nan
+
+        # --- dtype-safe initialization (no FutureWarning) ---
+        out["predicted_label"] = pd.Series(index=out.index, dtype="object")       # labels may be str/int
+        out["predicted_proba"] = pd.Series(np.nan, index=out.index, dtype="float64")
+        out["proba_pseudo"]   = pd.Series(np.nan, index=out.index, dtype="float64")
 
         if mask.any():
             texts = out.loc[mask, "selected_text"].tolist()
@@ -288,7 +319,6 @@ class Predictor:
             out.loc[mask, "predicted_label"] = preds
 
             # pseudo-proba via decision_function -> softmax
-            p_hat = np.full(shape=(len(texts),), fill_value=np.nan, dtype=float)
             if hasattr(self.pipe, "decision_function"):
                 margins = self.pipe.decision_function(X)  # (n, K) or (n,)
                 if margins.ndim == 1:  # binary safety
@@ -298,18 +328,19 @@ class Predictor:
                 try:
                     classes = self.pipe.named_steps["linear_svc"].classes_
                 except Exception:
-                    # last-resort try (not typical for Pipeline)
                     classes = np.unique(preds)
                 cls_to_ix = {c: i for i, c in enumerate(classes)}
                 pred_ix = np.array([cls_to_ix[c] for c in preds])
                 p_hat = probs[np.arange(len(texts)), pred_ix]
-            # fill pseudo-proba (predicted_proba stays NaN to reflect LinearSVC)
-            out.loc[mask, "proba_pseudo"] = p_hat
+                out.loc[mask, "proba_pseudo"] = p_hat
 
         return out
 
+
 def load_predictor(artifacts_dir: str | Path | None = None) -> Predictor:
+    """Factory: Predictor that loads packaged artifacts by default."""
     return Predictor(artifacts_dir)
+
 
 # ------------------------------ One-liner wrapper ----------------------------
 
@@ -326,6 +357,10 @@ def svm_predictor(
       - DataFrame in long (name/content_latest) OR wide schema;
       - list[str] of texts;
       - list[dict] rows.
+
+    Returns:
+      DataFrame with selected_text/predicted_label/predicted_proba/proba_pseudo,
+      or a numpy array of labels if output="labels".
     """
     pred = load_predictor(artifacts_dir)
 
@@ -335,14 +370,13 @@ def svm_predictor(
 
     if isinstance(raw_data, list):
         if len(raw_data) == 0:
-            return pd.DataFrame(columns=["selected_text", "predicted_label", "predicted_proba", "proba_pseudo"]) \
-                if output == "df" else np.array([])
+            return (pd.DataFrame(columns=["selected_text", "predicted_label", "predicted_proba", "proba_pseudo"])
+                    if output == "df" else np.array([]))
         first = raw_data[0]
         if isinstance(first, str):
-            # make a DF for consistency with output columns
             tmp = pd.DataFrame({"selected_text": raw_data})
-            return pred.predict_dataframe(tmp, text_col="selected_text") if output == "df" else \
-                   pred.predict_dataframe(tmp, text_col="selected_text")["predicted_label"].to_numpy()
+            df_out = pred.predict_dataframe(tmp, text_col="selected_text")
+            return df_out if output == "df" else df_out["predicted_label"].to_numpy()
         if isinstance(first, dict):
             df = pd.DataFrame(raw_data)
             df_out = pred.predict_dataframe(df, text_col=text_col)
