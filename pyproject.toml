@@ -20,16 +20,18 @@ dependencies = [
   "torch",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["meta_tag_classifier*"]
-
-[tool.setuptools.package-data]
-"meta_tag_classifier" = ["py.typed", "artifacts/*"]
-
 [project.scripts]
 mtc = "meta_tag_classifier.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+# Find the package whether it's in ./meta_tag_classifier or ./src/meta_tag_classifier
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["meta_tag_classifier*"]
+
+# Ship type hints and packaged model artifacts
+[tool.setuptools.package-data]
+meta_tag_classifier = ["py.typed", "artifacts/*"]
+
