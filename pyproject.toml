@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.setuptools]
-packages = { find = { include = ["scripts*"] } }
+packages = { find = { include = ["scripts*", "meta_tag_classifier*"] } }
 
 [project.scripts]
 mtc = "meta_tag_classifier.cli:main"
