@@ -1,15 +1,51 @@
 # Meta-Tag-Classifier
 
-Pipeline to get a classification of a templated domain using its homepage meta tags (description, title, og:description, og:title). The library implements an SVM Classifier trained on `distiluse-base-multilingual-cased-v2` multilingual embeddings of a data set composed of 
+Pipeline to get a classification of a templated domain using its homepage meta tags (description, title, og:description, og:title). The library implements an SVM Classifier trained on `distiluse-base-multilingual-cased-v2` multilingual embeddings of a dataset of ~`12k` meta tags from templated domains.
 
 # Methods
 
 The construction of the training data followed several steps. First, we took a random sample of `11923` templated domains and retrieved meta tags from the homepage using the `meta_tags` superset table. Then we used BERTopic to get soft labels for each domain, using `distiluse-base-multilingual-cased-v2` embeddings of the selected meta tag (after cleaning/processing). After that, several regex-based heuristics were applied to prune further the proposed labels. Once we had a curated labeled data set, we trained an SVM Classifier and tested the model using a data set of manually labeled templates (837 domains).
 
-## Install (editable)
+# Install (editable)
+
+## Repository
+
 ```bash
+git clone https://github.com/cags9607/Meta-Tag-Classifier.git
+cd Meta-Tag-Classifier
 pip install -e .
 ```
+
+## Library
+
+```bash
+pip install -U pip
+pip install "git+https://github.com/cags9607/Meta-Tag-Classifier.git"
+```
+
+# Usage
+
+```python
+import pandas as pd
+from meta_tag_classifier import svm_predictor
+
+# LONG format (rows per meta)
+df_long = pd.DataFrame([
+    {"target_domain":"https://fitjourney.example","name":"title","content_latest":"Fitjourney"},
+    {"target_domain":"https://fitjourney.example","name":"description","content_latest":"Daily plans for strength and cardio."},
+    {"target_domain":"http://shoestore.example","name":"og:title","content_latest":"Best running shoes"},
+    {"target_domain":"http://shoestore.example","name":"og:description","content_latest":"Lightweight marathon trainers for all distances."},
+])
+
+out = svm_predictor(df_long)   # auto-pivot → clean → embed → predict
+print(out)
+```
+
+|index|target\_domain|selected\_text|predicted\_label|predicted\_proba|proba\_pseudo|
+|---|---|---|---|---|---|
+|0|fitjourney\.example|Daily plans for strength and cardio\.|Content Farm|NaN|0\.40931944629041905|
+|1|shoestore\.example|Best running shoes|Content Farm|NaN|0\.3182812910331625|
+
 
 ## Cleaning
 
