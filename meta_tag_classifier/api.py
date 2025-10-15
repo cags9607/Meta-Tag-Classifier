@@ -5,7 +5,7 @@ import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -28,7 +28,6 @@ from .utils import ensure_dir  # simple mkdir helper
 
 _model_cache: Dict[str, SentenceTransformer] = {}
 
-
 def _get_embedder(model_name: str) -> SentenceTransformer:
     """Get (and cache) a SentenceTransformer embedder."""
     m = _model_cache.get(model_name)
@@ -36,7 +35,6 @@ def _get_embedder(model_name: str) -> SentenceTransformer:
         m = SentenceTransformer(model_name)
         _model_cache[model_name] = m
     return m
-
 
 def embed_texts(
     texts: Iterable[str],
@@ -85,7 +83,6 @@ class TrainResult:
     pipeline_filename: str = "pipeline.pkl"
     pipeline_format: str = "pickle"  # "pickle" or "joblib"
 
-
 def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "pickle" or path.suffix.lower() == ".pkl":
@@ -94,7 +91,6 @@ def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
     else:
         import joblib
         joblib.dump(obj, path)
-
 
 def train(
     df: pd.DataFrame,
@@ -176,27 +172,18 @@ def train(
 # --------------------- Packaged-artifacts loading helpers --------------------
 
 def _packaged_artifacts_dir() -> Path | Any:
-    """
-    Locate artifacts bundled inside the installed package:
-      meta_tag_classifier/artifacts/{meta.json, pipeline.*}
-    Returns a Traversable or a materialized Path via as_file().
-    """
+    """Locate artifacts bundled inside the installed package."""
     try:
         return files("meta_tag_classifier") / "artifacts"
     except Exception:
         return Path(__file__).resolve().parent / "artifacts"
 
-
 def _load_pipeline_any(path: Path, fmt: Optional[str] = None) -> Any:
-    """
-    Load a pipeline saved as pickle (.pkl) or joblib (.joblib/.pkl),
-    preferring 'fmt' when provided, otherwise infer from suffix.
-    """
+    """Load a pipeline saved as pickle (.pkl) or joblib (.joblib/.pkl)."""
     suffix = path.suffix.lower()
     if fmt == "pickle" or suffix == ".pkl":
         with open(path, "rb") as f:
             return pickle.load(f)
-    # Else fallback to joblib
     import joblib
     return joblib.load(path)
 
@@ -229,17 +216,31 @@ def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
         return ""
     return df.apply(pick, axis=1)
 
+def _ensure_wide(
+    df: pd.DataFrame,
+    domain_col: str = "target_domain",
+    name_col: str = "name",
+    value_col: str = "content_latest",
+) -> pd.DataFrame:
+    """
+    If input is long-format (has domain/name/value), pivot to wide and build
+    title_meta / description_meta like your Colab. Otherwise pass through and
+    ensure required columns exist for the cleaner.
+    """
+    if {domain_col, name_col, value_col}.issubset(df.columns):
+        return long_to_wide_meta(
+            df,
+            domain_col=domain_col,
+            name_col=name_col,
+            value_col=value_col,
+        )
 
-def _ensure_wide(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    If input is long-format (has 'name' & 'content_latest'), pivot to wide and
-    synthesize title_meta / description_meta like your Colab.
-    Otherwise pass through (ensuring those columns exist).
-    """
-    if {"name", "content_latest", "target_domain"}.issubset(df.columns):
-        return long_to_wide_meta(df)
+    # Wide path: make sure the cleaner has what it needs
     out = df.copy()
-    for col in ["title_meta", "description_meta", "target_domain"]:
+    if "target_domain" not in out.columns:
+        # try to build from the provided domain_col, else empty
+        out["target_domain"] = out[domain_col].astype(str) if domain_col in out.columns else ""
+    for col in ["title_meta", "description_meta"]:
         if col not in out.columns:
             out[col] = ""
     return out
@@ -274,38 +275,61 @@ class Predictor:
         self.meta = meta or {"embedding_model": "distiluse-base-multilingual-cased-v2"}
         self.model = _get_embedder(self.meta.get("embedding_model", "distiluse-base-multilingual-cased-v2"))
 
-    def predict_dataframe(self, df: pd.DataFrame, text_col: Optional[str] = None) -> pd.DataFrame:
+    def predict_dataframe(
+        self,
+        df: pd.DataFrame,
+        text_col: Optional[str] = None,
+        *,
+        # column-name overrides for long-format ingestion
+        domain_col: str = "target_domain",
+        meta_tag_name: str = "name",
+        meta_tag_value: str = "content_latest",
+        # name of the domain column to expose in the output
+        output_domain_col: Optional[str] = None,
+    ) -> pd.DataFrame:
         """
         If `text_col` is provided, uses it directly; otherwise:
-          - auto-detects long CSV layout and pivots it,
-          - cleans to `selected_text`,
-          - falls back to composing from raw fields when selected_text is empty,
-          - predicts with LinearSVC pipeline,
-          - returns columns: target_domain (if present), selected_text, predicted_label,
-                             predicted_proba (NaN for LinearSVC), proba_pseudo.
+          - auto-detects long CSV layout using (domain_col, meta_tag_name, meta_tag_value)
+          - pivots to wide and builds title_meta/description_meta
+          - cleans to `selected_text`
+          - falls back to composing from raw fields when selected_text is empty
+          - predicts with LinearSVC pipeline
+          - returns: domain column (see `output_domain_col`), selected_text, predicted_label,
+                     predicted_proba (NaN), proba_pseudo.
         """
+        if output_domain_col is None:
+            output_domain_col = domain_col  # mirror user's chosen name
+
         base = df.copy()
 
         # 1) Prepare text to embed
         if text_col is None or text_col not in base.columns:
-            wide = _ensure_wide(base)
+            wide = _ensure_wide(
+                base,
+                domain_col=domain_col,
+                name_col=meta_tag_name,
+                value_col=meta_tag_value,
+            )
             proc = clean_dataframe(wide)
             out = proc[["selected_text"]].copy()
+
+            # domain pass-through under user's chosen name
             if "target_domain" in proc.columns:
-                out.insert(0, "target_domain", proc["target_domain"])
+                out.insert(0, output_domain_col, proc["target_domain"])
+
             # fallback for empties
             empty_mask = out["selected_text"].fillna("").astype(str).str.strip() == ""
             if empty_mask.any():
                 out.loc[empty_mask, "selected_text"] = _fallback_selected_text(wide.loc[empty_mask])
         else:
             out = base[[text_col]].rename(columns={text_col: "selected_text"}).copy()
-            if "target_domain" in base.columns:
-                out.insert(0, "target_domain", base["target_domain"])
+            if domain_col in base.columns:
+                out.insert(0, output_domain_col, base[domain_col])
 
         # 2) Predict only for non-empty texts; keep all rows in output
         mask = out["selected_text"].fillna("").astype(str).str.strip() != ""
 
-        # --- dtype-safe initialization (no FutureWarning) ---
+        # dtype-safe initialization (avoid FutureWarning)
         out["predicted_label"] = pd.Series(index=out.index, dtype="object")       # labels may be str/int
         out["predicted_proba"] = pd.Series(np.nan, index=out.index, dtype="float64")
         out["proba_pseudo"]   = pd.Series(np.nan, index=out.index, dtype="float64")
@@ -349,23 +373,43 @@ def svm_predictor(
     artifacts_dir: str | Path | None = None,
     text_col: str | None = None,
     output: str = "df",
+    *,
+    # column-name overrides for ingestion (long format)
+    domain_col: str = "target_domain",
+    meta_tag_name: str = "name",
+    meta_tag_value: str = "content_latest",
+    # customize output domain column name
+    output_domain_col: Optional[str] = None,
 ):
     """
     One-call prediction.
 
     raw_data:
-      - DataFrame in long (name/content_latest) OR wide schema;
+      - DataFrame in long (domain_col/meta_tag_name/meta_tag_value) OR wide schema;
       - list[str] of texts;
       - list[dict] rows.
 
+    Column name params let you match your CSV:
+      - domain_col      (default "target_domain")
+      - meta_tag_name   (default "name")
+      - meta_tag_value  (default "content_latest")
+      - output_domain_col (default mirrors domain_col)
+
     Returns:
-      DataFrame with selected_text/predicted_label/predicted_proba/proba_pseudo,
-      or a numpy array of labels if output="labels".
+      DataFrame with {output_domain_col}, selected_text, predicted_label,
+      predicted_proba (NaN), proba_pseudo; or labels ndarray if output="labels".
     """
     pred = load_predictor(artifacts_dir)
 
     if isinstance(raw_data, pd.DataFrame):
-        df_out = pred.predict_dataframe(raw_data.copy(), text_col=text_col)
+        df_out = pred.predict_dataframe(
+            raw_data.copy(),
+            text_col=text_col,
+            domain_col=domain_col,
+            meta_tag_name=meta_tag_name,
+            meta_tag_value=meta_tag_value,
+            output_domain_col=output_domain_col,
+        )
         return df_out if output == "df" else df_out["predicted_label"].to_numpy()
 
     if isinstance(raw_data, list):
@@ -375,11 +419,21 @@ def svm_predictor(
         first = raw_data[0]
         if isinstance(first, str):
             tmp = pd.DataFrame({"selected_text": raw_data})
-            df_out = pred.predict_dataframe(tmp, text_col="selected_text")
+            df_out = pred.predict_dataframe(
+                tmp, text_col="selected_text",
+                domain_col=domain_col, meta_tag_name=meta_tag_name,
+                meta_tag_value=meta_tag_value,
+                output_domain_col=output_domain_col,
+            )
             return df_out if output == "df" else df_out["predicted_label"].to_numpy()
         if isinstance(first, dict):
             df = pd.DataFrame(raw_data)
-            df_out = pred.predict_dataframe(df, text_col=text_col)
+            df_out = pred.predict_dataframe(
+                df, text_col=text_col,
+                domain_col=domain_col, meta_tag_name=meta_tag_name,
+                meta_tag_value=meta_tag_value,
+                output_domain_col=output_domain_col,
+            )
             return df_out if output == "df" else df_out["predicted_label"].to_numpy()
 
     raise TypeError("raw_data must be a pandas DataFrame, list[str], or list[dict].")
