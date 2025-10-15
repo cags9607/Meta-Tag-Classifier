@@ -68,7 +68,8 @@ out = svm_predictor(
     meta_tag_name="name",
     meta_tag_value="content_latest"
 )  # auto-pivot → clean → embed → predict
-out
+
+print(out)
 ```
 
 |index|target\_domain|selected\_text|predicted\_label|predicted\_proba|proba\_pseudo|
