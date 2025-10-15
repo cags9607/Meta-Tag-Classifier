@@ -1,6 +1,6 @@
 {
   "embedding_model": "distiluse-base-multilingual-cased-v2",
-  "pipeline_filename": "pipeline.pkl",
+  "pipeline_filename": "20250823_svm_7cat_v2.pkl",
   "pipeline_format": "pickle",
   "best_params": {
     "linear_svc__C": 0.001
@@ -14,7 +14,6 @@
     "Parked/Holding",
     "Tool"
   ],
-  "cv_f1_macro": 0.5650140908088038,
   "test_f1_macro": 0.6891092120620866,
   "test_accuracy": 0.7909199522102748
 }
