@@ -29,22 +29,55 @@ pip install "git+https://github.com/cags9607/Meta-Tag-Classifier.git"
 import pandas as pd
 from meta_tag_classifier import svm_predictor
 
-# LONG format (rows per meta)
 df_long = pd.DataFrame([
-    {"target_domain":"https://fitjourney.example","name":"title","content_latest":"Fitjourney"},
-    {"target_domain":"https://fitjourney.example","name":"description","content_latest":"Daily plans for strength and cardio."},
-    {"target_domain":"http://shoestore.example","name":"og:title","content_latest":"Best running shoes"},
-    {"target_domain":"http://shoestore.example","name":"og:description","content_latest":"Lightweight marathon trainers for all distances."},
+   
+    # App Download Portal
+    {"target_domain":"https://apkpremium.example","name":"title","content_latest":"YouTube MOD APK — Premium Unlocked"},
+    {"target_domain":"https://apkpremium.example","name":"description","content_latest":"Download premium APKs with no ads and extra features."},
+
+    # Content Farm
+    {"target_domain":"https://healthtipsdaily.example","name":"title","content_latest":"10 Miracle Foods Doctors Hate!"},
+    {"target_domain":"https://healthtipsdaily.example","name":"description","content_latest":"Shocking secrets to boost weight loss overnight with these tips."},
+
+    # News Scraper
+    {"target_domain":"https://topnewshub.example","name":"og:title","content_latest":"Trending News: World, Business, Tech"},
+    {"target_domain":"https://topnewshub.example","name":"og:description","content_latest":"Live aggregated headlines updated every minute from hundreds of sources."},
+
+    # Novels or Short Stories
+    {"target_domain":"https://readshortstories.example","name":"title","content_latest":"The Lantern At Dusk — Chapter 1"},
+    {"target_domain":"https://readshortstories.example","name":"description","content_latest":"A quiet village, a restless shadow, and a secret in the attic."},
+
+    # Online Games & Trivia
+    {"target_domain":"https://playtriviafree.example","name":"title","content_latest":"Play Free Online Games"},
+    {"target_domain":"https://playtriviafree.example","name":"description","content_latest":"Casual puzzles, arcade, and multiplayer trivia — no download required."},
+
+    # Parked/Holding
+    {"target_domain":"https://get-this-domain.example","name":"title","content_latest":"This Domain Is For Sale"},
+    {"target_domain":"https://get-this-domain.example","name":"description","content_latest":"parked"},
+
+    # Tool
+    {"target_domain":"https://giftoolkit.example","name":"title","content_latest":"GIF Maker — Free Animated Images"},
+    {"target_domain":"https://giftoolkit.example","name":"description","content_latest":"Create, resize, and optimize GIFs right in your browser."},
 ])
 
-out = svm_predictor(df_long, domain_col = "target_domain", meta_tag_name = "name", meta_tag_value = "content_latest")   # auto-pivot → clean → embed → predict
-print(out)
+out = svm_predictor(
+    df_long,
+    domain_col="target_domain",
+    meta_tag_name="name",
+    meta_tag_value="content_latest"
+)  # auto-pivot → clean → embed → predict
+out
 ```
 
 |index|target\_domain|selected\_text|predicted\_label|predicted\_proba|proba\_pseudo|
 |---|---|---|---|---|---|
-|0|fitjourney\.example|Daily plans for strength and cardio\.|Content Farm|NaN|0\.40931944629041905|
-|1|shoestore\.example|Best running shoes|Content Farm|NaN|0\.3182812910331625|
+|0|apkpremium\.example|Download premium APKs with no ads and extra features\.|App Download Portal|NaN|0\.3356097699714278|
+|1|get-this-domain\.example|This Domain Is For Sale|Parked/Holding|NaN|0\.46050087376644117|
+|2|giftoolkit\.example|Create, resize, and optimize GIFs right in your browser\.|Tool|NaN|0\.45386199338831246|
+|3|healthtipsdaily\.example|Shocking secrets to boost weight loss overnight with these tips\.|Content Farm|NaN|0\.26464324793488536|
+|4|playtriviafree\.example|Casual puzzles, arcade, and multiplayer trivia no download required\.|Online Games & Trivia|NaN|0\.7680241748220957|
+|5|readshortstories\.example|A quiet village, a restless shadow, and a secret in the attic\.|Novels or Short Stories|NaN|0\.3355778725194999|
+|6|topnewshub\.example|Live aggregated headlines updated every minute from hundreds of sources\.|News Scraper|NaN|0\.2563293300283744|
 
 
 ## Cleaning
