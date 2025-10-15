@@ -4,7 +4,9 @@ Pipeline to get a classification of a templated domain using its homepage meta t
 
 # Methods
 
-The construction of the training data followed several steps. First, we took a random sample of `11923` templated domains and retrieved meta tags from their homepages using the `meta_tags` superset table. Then we used BERTopic (https://maartengr.github.io/BERTopic/index.html) to get soft labels for each domain, using `distiluse-base-multilingual-cased-v2` embeddings of the selected meta tag (after cleaning/processing). After that, several regex-based heuristics were applied to prune further the proposed labels. Once we had a curated labeled data set, we trained an SVM Classifier and tested the model using a data set of manually labeled templates (837 domains).
+The construction of the training data followed several steps. First, we took a random sample of `11923` templated domains and retrieved meta tags (`title`, `description`, `og:title`, `og:description`) from their homepages using the `meta_tags` superset table. Then we used BERTopic (https://maartengr.github.io/BERTopic/index.html) to get soft labels for each domain, using `distiluse-base-multilingual-cased-v2` embeddings of the selected meta tag (after cleaning/processing, detailed in sections below). After that, several regex-based heuristics were applied to prune further the proposed labels. Once we had a curated labeled data set, we trained an SVM Classifier and tested the model using a data set of manually labeled templates (837 domains).
+
+The process to select which meta tag to use was inspired by the paper **Hierarchical Contaminated Web Page Classification Based on Meta Tag Denoising Disposal** (see Acknowledgments).
 
 # Install 
 
@@ -168,4 +170,6 @@ If you need to change file names/locations, pass `--x-train`, `--y-train`, `--x-
 # Acknowledgements
 
 - SentenceTransformers (DistilUSE Multilingual)
-- scrikit-learn pipeline (StandardScaler -> PCA -> LinearSVC)
+- scikit-learn pipeline (StandardScaler -> PCA -> LinearSVC)
+- BERTopic (https://maartengr.github.io/BERTopic/index.html)
+- **Hierarchical Contaminated Web Page Classification Based on Meta Tag Denoising Disposal**. Retrieved from: https://onlinelibrary.wiley.com/doi/10.1155/2021/2470897
