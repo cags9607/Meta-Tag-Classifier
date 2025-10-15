@@ -99,7 +99,7 @@ print(out)
 
 # Model Artifacts
 
-The library will look in meta_tag_classifier/artifacts/ for:
+The library will look in `meta_tag_classifier/artifacts/` for:
 
 ```arduino
 pipeline.pkl    # scikit-learn pipeline (pickle)
@@ -107,7 +107,7 @@ meta.json       # metadata (embedder name, filename, classes, etc.)
 report.txt      # optional training report
 ```
 
-To ship a new model, just overwrite `pipeline.pkl` and update `meta.json` accordingly.
+To ship a new model, just overwrite `pipeline.pkl` (or `20250823_svm_7cat_v2.pkl`) and update `meta.json` accordingly.
 
 # Training
 
@@ -134,7 +134,7 @@ python scripts/train_from_pickles.py \
 
 ```
 
-This writes `pipeline.pkl`, `meta.json`, and `report.txt` into meta_tag_classifier/artifacts/.
+This writes `pipeline.pkl`, `meta.json`, and `report.txt` into `meta_tag_classifier/artifacts/`.
 
 If you need to change file names/locations, pass `--x-train`, `--y-train`, `--x-test`, `--y-test` with proper paths.
 
