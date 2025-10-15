@@ -6,7 +6,7 @@ Pipeline to get a classification of a templated domain using its homepage meta t
 
 The construction of the training data followed several steps. First, we took a random sample of `11923` templated domains and retrieved meta tags from the homepage using the `meta_tags` superset table. Then we used BERTopic to get soft labels for each domain, using `distiluse-base-multilingual-cased-v2` embeddings of the selected meta tag (after cleaning/processing). After that, several regex-based heuristics were applied to prune further the proposed labels. Once we had a curated labeled data set, we trained an SVM Classifier and tested the model using a data set of manually labeled templates (837 domains).
 
-# Install (editable)
+# Install 
 
 ## Repository
 
