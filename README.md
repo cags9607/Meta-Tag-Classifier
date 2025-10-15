@@ -37,7 +37,7 @@ df_long = pd.DataFrame([
     {"target_domain":"http://shoestore.example","name":"og:description","content_latest":"Lightweight marathon trainers for all distances."},
 ])
 
-out = svm_predictor(df_long)   # auto-pivot → clean → embed → predict
+out = svm_predictor(df_long, domain_col = "target_domain", meta_tag_name = "name", meta_tag_value = "content_latest")   # auto-pivot → clean → embed → predict
 print(out)
 ```
 
@@ -83,10 +83,56 @@ texts = ["example description", "another meta title"]
 labels, probas = pred.predict_texts(texts)
 ```
 
-## CLI
-```bash
-python -m meta_tag_classifier.cli train --config configs/default.yaml
-python -m meta_tag_classifier.cli predict --artifacts models/artifacts --input data/processed/infer_input.csv --output data/processed/preds.csv
-# or, after install:
-mtc predict --artifacts models/artifacts --input data/processed/infer_input.csv --output data/processed/preds.csv
+# Model Artifacts
+
+The library will look in meta_tag_classifier/artifacts/ for:
+
+```arduino
+pipeline.pkl    # scikit-learn pipeline (pickle)
+meta.json       # metadata (embedder name, filename, classes, etc.)
+report.txt      # optional training report
 ```
+
+To ship a new model, just overwrite `pipeline.pkl` and update `meta.json` accordingly.
+
+# Training
+
+To train a new model we can use:
+
+```bash
+scripts/train_from_pickle.py
+```
+
+with relative paths
+
+```bash
+data/embeddings/20251015_X_train_svm.pkl
+data/embeddings/20251015_y_train_svm.pkl
+data/embeddings/20251015_X_test_svm.pkl
+data/embeddings/20251015_y_test_svm.pkl
+```
+
+Run:
+
+```
+python scripts/train_from_pickles.py \
+  --artifacts-out meta_tag_classifier/artifacts
+
+```
+
+This writes `pipeline.pkl`, `meta.json`, and `report.txt` into meta_tag_classifier/artifacts/.
+
+If you need to change file names/locations, pass `--x-train`, `--y-train`, `--x-test`, `--y-test` with proper paths.
+
+# Notes and tips
+
+- The first inference downloads the SentenceTransformers (~540mb). Then cache with `SENTENCE_TRANSFORMERS_HOME` so no need to redownload after every call.
+
+- `predicted_proba` is `NaN` because there is not enough test data to calibrate the model (will change in the future). `proba_pseudo` (softmax over SVM margins) is included for ranking tasks.
+
+- GPU will be used automatically by SentenceTransformers, if available.
+
+# Acknowledgements
+
+- SentenceTransformers (DistilUSE Multilingual)
+- scrikit-learn pipeline (StandardScaler -> PCA -> LinearSVC)
