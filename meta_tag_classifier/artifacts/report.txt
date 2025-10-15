@@ -1,7 +1,6 @@
 == Grid Search ==
 Param grid: {'linear_svc__C': [0.0001, 0.001, 0.01, 0.1, 1.0]}
 Best params: {'linear_svc__C': 0.001}
-Best CV f1_macro: 0.565014
 
 == Test Metrics ==
 Accuracy: 0.790920
