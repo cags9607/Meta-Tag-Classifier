@@ -6,4 +6,5 @@ regex>=2024.5
 tqdm>=4.66
 sentence-transformers>=3.0.0
 numpy>=1.24
+requests>=2.31
 torch
