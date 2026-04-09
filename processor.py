@@ -20,8 +20,8 @@ Supported job payloads:
 
 Output rows:
 - session_id
-- target_url         # populated from incoming legacy target_domain
-- name               # selected meta-tag name
+- target_url
+- name
 - selected_text
 - predicted_label
 - predicted_proba
