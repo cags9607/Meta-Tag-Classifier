@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 def pop(batch_size: int = 1) -> list:
-    """Fetch jobs from the queue."""
     headers = {"x-api-key": QUEUE_API_KEY}
     data = {
         "key": QUEUE_KEY,
@@ -28,7 +27,6 @@ def pop(batch_size: int = 1) -> list:
 
 
 def push(processed_jobs: list):
-    """Push processed jobs back to the queue."""
     headers = {"x-api-key": QUEUE_API_KEY}
     data = {
         "key": QUEUE_KEY,
