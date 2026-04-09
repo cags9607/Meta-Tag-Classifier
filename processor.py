@@ -103,9 +103,12 @@ def _build_prediction_input(df_rows: pd.DataFrame) -> pd.DataFrame:
 
     pred_df = (
         df_rows
-        .loc[lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS)]
-        .rename(columns = {"content": "content_latest", "name_norm": "name"})
-        [["target_domain", "name", "content_latest"]]
+        .loc[lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS), ["target_domain", "name_norm", "content"]]
+        .copy()
+        .rename(columns = {
+            "name_norm": "name",
+            "content": "content_latest",
+        })
         .drop_duplicates()
         .reset_index(drop = True)
     )
