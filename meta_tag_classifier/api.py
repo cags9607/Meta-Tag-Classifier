@@ -276,7 +276,7 @@ class Predictor:
         mask = out["selected_text"].fillna("").astype(str).str.strip() != ""
 
         out["predicted_label"] = pd.Series(index = out.index, dtype = "object")
-        out["predicted_proba"] = pd.Series(np.nan, index = out.index, dtype = "float64")
+        out["predicted_proba"] = pd.Series([None] * len(out), index = out.index, dtype = "object")
         out["proba_pseudo"] = pd.Series(np.nan, index = out.index, dtype = "float64")
 
         if mask.any():
