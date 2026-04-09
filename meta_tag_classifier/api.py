@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -24,14 +25,12 @@ from .utils import ensure_dir
 
 _model_cache: Dict[str, SentenceTransformer] = {}
 
-
 def _get_embedder(model_name: str) -> SentenceTransformer:
     m = _model_cache.get(model_name)
     if m is None:
         m = SentenceTransformer(model_name)
         _model_cache[model_name] = m
     return m
-
 
 def embed_texts(
     texts: Iterable[str],
@@ -61,25 +60,15 @@ def clean_dataframe(
     )
 
 
+@dataclass
 class TrainResult:
-    def __init__(
-        self,
-        artifacts_dir: Path,
-        best_params: Dict[str, Any],
-        report_text: str,
-        classes: List[Any],
-        embedding_model: str,
-        pipeline_filename: str = "pipeline.pkl",
-        pipeline_format: str = "pickle",
-    ):
-        self.artifacts_dir = artifacts_dir
-        self.best_params = best_params
-        self.report_text = report_text
-        self.classes = classes
-        self.embedding_model = embedding_model
-        self.pipeline_filename = pipeline_filename
-        self.pipeline_format = pipeline_format
-
+    artifacts_dir: Path
+    best_params: Dict[str, Any]
+    report_text: str
+    classes: List[Any]
+    embedding_model: str
+    pipeline_filename: str = "pipeline.pkl"
+    pipeline_format: str = "pickle"
 
 def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
     path.parent.mkdir(parents = True, exist_ok = True)
@@ -89,7 +78,6 @@ def _save_pipeline(obj: Any, path: Path, fmt: str = "pickle") -> None:
     else:
         import joblib
         joblib.dump(obj, path)
-
 
 def train(
     df: pd.DataFrame,
@@ -169,7 +157,6 @@ def _packaged_artifacts_dir() -> Path | Any:
     except Exception:
         return Path(__file__).resolve().parent / "artifacts"
 
-
 def _load_pipeline_any(path: Path, fmt: Optional[str] = None) -> Any:
     suffix = path.suffix.lower()
     if fmt == "pickle" or suffix == ".pkl":
@@ -177,7 +164,6 @@ def _load_pipeline_any(path: Path, fmt: Optional[str] = None) -> Any:
             return pickle.load(f)
     import joblib
     return joblib.load(path)
-
 
 def _rowwise_softmax(m: np.ndarray) -> np.ndarray:
     z = m - m.max(axis = 1, keepdims = True)
@@ -193,7 +179,6 @@ _FALLBACK_FIELDS = [
     "meta_description"
 ]
 
-
 def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
     def pick(row):
         for c in _FALLBACK_FIELDS:
@@ -202,7 +187,6 @@ def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
                 return v.strip()
         return ""
     return df.apply(pick, axis = 1)
-
 
 def _ensure_wide(
     df: pd.DataFrame,
@@ -274,10 +258,7 @@ class Predictor:
             )
             proc = clean_dataframe(wide)
 
-            keep_cols = ["selected_text"]
-            if "selected_name" in proc.columns:
-                keep_cols.append("selected_name")
-
+            keep_cols = ["selected_text", "selected_name"]
             out = proc[keep_cols].copy()
 
             if "target_domain" in proc.columns:
@@ -286,9 +267,6 @@ class Predictor:
             empty_mask = out["selected_text"].fillna("").astype(str).str.strip() == ""
             if empty_mask.any():
                 out.loc[empty_mask, "selected_text"] = _fallback_selected_text(wide.loc[empty_mask])
-
-            if "selected_name" not in out.columns:
-                out["selected_name"] = pd.Series(index = out.index, dtype = "object")
         else:
             out = base[[text_col]].rename(columns = {text_col: "selected_text"}).copy()
             if domain_col in base.columns:
@@ -365,8 +343,7 @@ def svm_predictor(
                         "proba_pseudo",
                     ]
                 )
-                if output == "df"
-                else np.array([])
+                if output == "df" else np.array([])
             )
 
         first = raw_data[0]
