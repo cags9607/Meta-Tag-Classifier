@@ -1,122 +1,131 @@
 """
-Meta-tag template classification processor.
+META_TAGS classification processor.
 
-Pulls jobs from queue key META_TAG_CLASSIFIER, expects LONG format input:
-  target_domain, name, content_latest
+Queue contract:
+- one queue job represents one crawl
+- each job contains N meta tags
+- the worker runs one domain-level prediction per job
+- the worker emits one flat result row per job
+- the worker pushes the flat results array grouped with job ids/tokens
 
-Uses proba_pseudo as the output probability (renamed to "probability" in results).
+Expected row shape inside each job:
+{ session_id, target_domain, name, content, timestamp }
 
-Robustness:
-- Every result row includes job_id (and job_token) to avoid any misalignment ambiguity.
-- Error and success rows share the exact same schema (prediction fields are None on error).
+Supported job payloads:
+1) job["data"] is a list[dict] of rows
+2) job["data"] is a dict containing one of:
+   - rows
+   - meta_tags
+   - tags
+
+Output rows:
+- session_id
+- target_url         # populated from incoming legacy target_domain
+- name               # selected meta-tag name
+- selected_text
+- predicted_label
+- predicted_proba
+- proba_pseudo
+- timestamp
 """
 
 from __future__ import annotations
 
-import time
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
 from core import MetaTagTemplateClassifier
+from processor_config import ARTIFACTS_DIR, BATCH_SIZE, EMPTY_QUEUE_SLEEP_SECONDS
 from processor_utils import pop, push
-from processor_config import BATCH_SIZE, EMPTY_QUEUE_SLEEP_SECONDS, ARTIFACTS_DIR
 
-# Logging
 logging.basicConfig(level = logging.INFO, format = "%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 classifier: Optional[MetaTagTemplateClassifier] = None
 
+PREDICTION_INPUT_TAGS = {"title", "description", "og:title", "og:description"}
 
-# ----------------------------
-# Payload parsing
-# ----------------------------
-def _coerce_long_df(job_data: Dict[str, Any]) -> pd.DataFrame:
-    """
-    Supported payload shape:
-    {
-  "target_domain": "example.com",
-  "timestamp": "2026-03-05T00:00:00Z",
-  "rows": [
-    {"name": "title", "content_latest": "Text from title meta tag"},
-    {"name": "description", "content_latest": "Text from description meta tag"},
-    {"name": "og:title", "content_latest": "Text from og:title meta tag"},
-    {"name": "og:description", "content_latest": "Text from og:description"}
-  ]
+
+def _extract_rows(job_data: Any) -> List[Dict[str, Any]]:
+    if isinstance(job_data, list):
+        return job_data
+
+    if isinstance(job_data, dict):
+        for key in ["rows", "meta_tags", "tags"]:
+            rows = job_data.get(key)
+            if rows is not None:
+                if not isinstance(rows, list):
+                    raise TypeError(f"job['data']['{key}'] must be a list")
+                return rows
+
+        if {"session_id", "target_domain", "name", "content", "timestamp"}.issubset(job_data.keys()):
+            return [job_data]
+
+    raise TypeError(
+        "job['data'] must be either a list of meta-tag rows or a dict containing rows/meta_tags/tags"
+    )
+
+
+def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    df = pd.DataFrame(rows).copy()
+
+    if df.shape[0] == 0:
+        return pd.DataFrame(columns = ["session_id", "target_domain", "name", "content", "timestamp"])
+
+    rename_map = {
+        "content_latest": "content",
     }
-   
-    """
-    if not isinstance(job_data, dict):
-        raise TypeError("job['data'] must be a dict")
+    df = df.rename(columns = {k: v for k, v in rename_map.items() if k in df.columns})
 
-    # accept 'rows' (recommended) or 'meta_tags' as alias
-    rows = job_data.get("rows", None)
-    if rows is None:
-        rows = job_data.get("meta_tags", None)
+    required = ["session_id", "target_domain", "name", "content", "timestamp"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise KeyError(f"missing_columns:{','.join(missing)}")
 
-    if rows is None:
-        # If upstream sends a single long row at the top-level (rare), allow it.
-        if all(k in job_data for k in ["target_domain", "name", "content_latest"]):
-            return pd.DataFrame([{
-                "target_domain": job_data["target_domain"],
-                "name": job_data["name"],
-                "content_latest": job_data["content_latest"],
-            }])
-        raise KeyError("Missing 'rows' (or 'meta_tags') in job data")
-
-    if not isinstance(rows, list):
-        raise TypeError("'rows' must be a list of dicts")
-
-    df = pd.DataFrame(rows)
-
-    # If job_data provides target_domain and rows don't include it, add it.
-    if "target_domain" in job_data and "target_domain" not in df.columns:
-        df["target_domain"] = job_data["target_domain"]
+    df = df[required].copy()
+    df["session_id"] = df["session_id"].astype(str)
+    df["target_domain"] = df["target_domain"].astype(str)
+    df["name"] = df["name"].astype(str)
+    df["content"] = df["content"].fillna("").astype(str)
+    df["timestamp"] = df["timestamp"].astype(str)
+    df["name_norm"] = df["name"].str.strip().str.lower()
 
     return df
 
 
-# ----------------------------
-# Result schema (stable columns)
-# ----------------------------
-_RESULT_KEYS = [
-    "job_id",
-    "job_token",
-    "target_domain",
-    "timestamp",
-    "predicted_label",
-    "probability",
-    "selected_text",
-    "status",
-    "error",
-]
+def _build_prediction_input(df_rows: pd.DataFrame) -> pd.DataFrame:
+    if df_rows.shape[0] == 0:
+        return pd.DataFrame(columns = ["target_domain", "name", "content_latest"])
+
+    pred_df = (
+        df_rows
+        .loc[lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS)]
+        .rename(columns = {"content": "content_latest", "name_norm": "name"})
+        [["target_domain", "name", "content_latest"]]
+        .drop_duplicates()
+        .reset_index(drop = True)
+    )
+
+    return pred_df
 
 
-def _blank_result(job_id: str, job_token: str, target_domain: str, timestamp: Optional[str]) -> Dict[str, Any]:
-    """
-    Start with a stable schema, fill in later.
-    """
+def _job_to_result_row(df_rows: pd.DataFrame, pred_row: Dict[str, Any]) -> Dict[str, Any]:
+    first_row = df_rows.iloc[0]
+
     return {
-        "job_id": job_id,
-        "job_token": job_token,
-        "target_domain": target_domain,
-        "timestamp": timestamp,
-        "predicted_label": None,
-        "probability": None,
-        "selected_text": None,
-        "status": None,   # "ok" or "error"
-        "error": None,
+        "session_id": first_row["session_id"],
+        "target_url": first_row["target_domain"],
+        "name": pred_row.get("selected_name"),
+        "selected_text": pred_row.get("selected_text"),
+        "predicted_label": pred_row.get("predicted_label"),
+        "predicted_proba": pred_row.get("predicted_proba"),
+        "proba_pseudo": pred_row.get("proba_pseudo"),
+        "timestamp": first_row["timestamp"],
     }
-
-
-def _as_stable_schema(d: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Ensure output dict has all keys (and only those keys), in a consistent order.
-    """
-    return {k: d.get(k, None) for k in _RESULT_KEYS}
 
 
 def process_batch(batch_size: int = 1):
@@ -125,7 +134,7 @@ def process_batch(batch_size: int = 1):
     if classifier is None:
         logger.info("Initializing MetaTagTemplateClassifier...")
         classifier = MetaTagTemplateClassifier(artifacts_dir = ARTIFACTS_DIR)
-        logger.info(f"MetaTagTemplateClassifier initialized (artifacts_dir={ARTIFACTS_DIR})")
+        logger.info(f"MetaTagTemplateClassifier initialized successfully (artifacts_dir={ARTIFACTS_DIR})")
 
     jobs = pop(batch_size = batch_size)
     n_jobs = len(jobs)
@@ -140,87 +149,45 @@ def process_batch(batch_size: int = 1):
     results: List[Dict[str, Any]] = []
 
     for job in jobs:
-        job_id = str(job.get("id", ""))
-        job_token = str(job.get("token", ""))
-        data = job.get("data", {}) or {}
-
-        timestamp = data.get("timestamp", None)
-        target_domain = data.get("target_domain", "") or ""
-
-        # Create a stable result shell immediately (misalignment-proof + schema-stable)
-        res = _blank_result(job_id = job_id, job_token = job_token, target_domain = target_domain, timestamp = timestamp)
-
         try:
-            df_long = _coerce_long_df(data)
+            rows_raw = _extract_rows(job.get("data", {}))
+            df_rows = _normalize_rows(rows_raw)
 
-            # Validate required columns for defaults
-            needed = {"target_domain", "name", "content_latest"}
-            missing = sorted(list(needed - set(df_long.columns)))
-            if missing:
-                # best-effort target_domain inference
-                if not res["target_domain"] and "target_domain" in df_long.columns and len(df_long) > 0:
-                    res["target_domain"] = str(df_long["target_domain"].iloc[0])
-
-                res["status"] = "error"
-                res["error"] = f"missing_columns:{','.join(missing)}"
-                results.append(_as_stable_schema(res))
+            if df_rows.shape[0] == 0:
+                logger.info(f"Job {job.get('id', '')}: no rows found in payload")
                 continue
 
-            # Ensure we have a target_domain for output (domain-level)
-            if not res["target_domain"] and len(df_long) > 0:
-                res["target_domain"] = str(df_long["target_domain"].iloc[0])
-
-            # Empty rows -> error
-            if df_long.shape[0] == 0:
-                res["status"] = "error"
-                res["error"] = "no_meta_rows"
-                results.append(_as_stable_schema(res))
+            pred_input = _build_prediction_input(df_rows)
+            if pred_input.shape[0] == 0:
+                logger.info(f"Job {job.get('id', '')}: no classifier-relevant tags were provided")
                 continue
 
-            pred_row = classifier.predict_one_domain(df_long)
-
+            pred_row = classifier.predict_one_domain(pred_input)
             if not pred_row:
-                res["status"] = "error"
-                res["error"] = "empty_prediction"
-                results.append(_as_stable_schema(res))
+                logger.info(f"Job {job.get('id', '')}: empty prediction returned")
                 continue
 
-            # Success path
-            res["target_domain"] = pred_row.get("target_domain", res["target_domain"])
-            res["predicted_label"] = pred_row.get("predicted_label", None)
-            res["selected_text"] = pred_row.get("selected_text", None)
-
-            # Rename proba_pseudo -> probability (canonical for now)
-            res["probability"] = pred_row.get("proba_pseudo", None)
-
-            res["status"] = "ok"
-            res["error"] = None
-            results.append(_as_stable_schema(res))
+            results.append(_job_to_result_row(df_rows, pred_row))
 
         except Exception as e:
-            res["status"] = "error"
-            res["error"] = f"exception:{type(e).__name__}:{e}"
-            results.append(_as_stable_schema(res))
+            logger.error(f"Failed to process job {job.get('id', '')}: {type(e).__name__}: {e}")
+            continue
 
-    filename = f"results_{int(time.time())}.json"
-
+    filename = f"meta_tag_results_{int(time.time())}.json"
     processed_jobs = [
         {
-            "jobs": [{"id": job.get("id", ""), "token": job.get("token", "")} for job in jobs],
+            "jobs": [{"id": job["id"], "token": job["token"]} for job in jobs],
             "filename": filename,
             "results": results,
         }
     ]
 
     push(processed_jobs)
-
-    ok = sum(1 for r in results if r.get("status") == "ok")
-    err = len(results) - ok
-    logger.info(f"Pushed {len(results)} results (ok={ok}, error={err}) back to queue")
+    logger.info(f"Pushed {len(results)} result rows for {n_jobs} jobs")
 
 
 def main():
-    logger.info("Starting meta-tag template classifier processor...")
+    logger.info("Starting META_TAGS processor...")
     while True:
         try:
             process_batch(batch_size = BATCH_SIZE)
