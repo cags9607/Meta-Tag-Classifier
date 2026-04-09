@@ -4,24 +4,16 @@ name: meta-tag-template-classifier
 python: "3.12"
 
 files:
-  # repo deps
-  - requirements.txt:/workflow/requirements.txt
-
-  # worker files
-  - processor.py:/workflow/processor.py
-  - processor_config.py:/workflow/processor_config.py
-  - processor_utils.py:/workflow/processor_utils.py
-  - core.py:/workflow/core.py
-
-  # classifier package + artifacts
-  - meta_tag_classifier:/workflow/meta_tag_classifier
+  - .:/workflow
 
 spot_policy: auto
+
 max_price: 0.25
 
 env:
-  - QUEUE_URL=https://deepsee-queue.herokuapp.com/exchange-batch
-  - QUEUE_API_KEY=YOUR_KEY_HERE
+  - QUEUE_URL=http://100.98.79.5:4949/exchange-batch
+  - QUEUE_API_KEY=your-queue-api-key
+  - QUEUE_KEY=META_TAGS
   - BATCH_SIZE=30
   - EMPTY_QUEUE_SLEEP_SECONDS=60
   - ARTIFACTS_DIR=/workflow/meta_tag_classifier/artifacts
@@ -32,9 +24,7 @@ commands:
   - python3 processor.py
 
 resources:
-  gpu:
-    memory: 16GB..24GB
-    name: ["A4000", "A4500", "A5000", "A6000", "RTX4090", "RTX4000Ada", "L4", "L40", "L40S"]
+  gpu: 16GB:1
 
 idle_duration: 6h
 
