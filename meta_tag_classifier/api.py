@@ -24,9 +24,6 @@ from .utils import ensure_dir
 
 _model_cache: Dict[str, SentenceTransformer] = {}
 
-PREDICTION_INPUT_TAGS = {"title", "description", "og:title", "og:description"}
-NAME_PRIORITY = ["title", "og:title", "description", "og:description"]
-
 
 def _get_embedder(model_name: str) -> SentenceTransformer:
     m = _model_cache.get(model_name)
@@ -207,64 +204,6 @@ def _fallback_selected_text(df: pd.DataFrame) -> pd.Series:
     return df.apply(pick, axis = 1)
 
 
-def _normalize_text_for_match(x: Any) -> str:
-    return " ".join(str(x or "").strip().split()).lower()
-
-
-def _pick_selected_name_from_long(
-    df_long: pd.DataFrame,
-    selected_text: Any,
-    *,
-    name_col: str = "name",
-    value_col: str = "content_latest",
-) -> Optional[str]:
-    selected_norm = _normalize_text_for_match(selected_text)
-    if not selected_norm:
-        return None
-
-    if df_long is None or df_long.shape[0] == 0:
-        return None
-
-    required = {name_col, value_col}
-    if not required.issubset(df_long.columns):
-        return None
-
-    candidates = df_long[[name_col, value_col]].copy()
-    candidates[name_col] = candidates[name_col].astype(str)
-    candidates["name_norm"] = candidates[name_col].str.strip().str.lower()
-    candidates[value_col] = candidates[value_col].fillna("").astype(str)
-
-    candidates = (
-        candidates
-        .loc[lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS)]
-        [[name_col, "name_norm", value_col]]
-        .drop_duplicates()
-        .reset_index(drop = True)
-    )
-
-    if candidates.shape[0] == 0:
-        return None
-
-    candidates["content_norm"] = candidates[value_col].map(_normalize_text_for_match)
-
-    exact = candidates.loc[candidates["content_norm"] == selected_norm].copy()
-    if exact.shape[0] > 0:
-        exact["priority"] = exact["name_norm"].map({name: i for i, name in enumerate(NAME_PRIORITY)})
-        exact = exact.sort_values(["priority", name_col])
-        return str(exact.iloc[0][name_col])
-
-    contains = candidates.loc[
-        candidates["content_norm"].map(lambda x: bool(x) and (selected_norm in x or x in selected_norm))
-    ].copy()
-    if contains.shape[0] > 0:
-        contains["priority"] = contains["name_norm"].map({name: i for i, name in enumerate(NAME_PRIORITY)})
-        contains["len_delta"] = (contains["content_norm"].str.len() - len(selected_norm)).abs()
-        contains = contains.sort_values(["len_delta", "priority", name_col])
-        return str(contains.iloc[0][name_col])
-
-    return None
-
-
 def _ensure_wide(
     df: pd.DataFrame,
     domain_col: str = "target_domain",
@@ -325,20 +264,8 @@ class Predictor:
             output_domain_col = domain_col
 
         base = df.copy()
-        df_long_for_name = None
 
         if text_col is None or text_col not in base.columns:
-            if {domain_col, meta_tag_name, meta_tag_value}.issubset(base.columns):
-                df_long_for_name = (
-                    base[[domain_col, meta_tag_name, meta_tag_value]]
-                    .copy()
-                    .rename(columns = {
-                        domain_col: "target_domain",
-                        meta_tag_name: "name",
-                        meta_tag_value: "content_latest",
-                    })
-                )
-
             wide = _ensure_wide(
                 base,
                 domain_col = domain_col,
@@ -346,7 +273,12 @@ class Predictor:
                 value_col = meta_tag_value,
             )
             proc = clean_dataframe(wide)
-            out = proc[["selected_text"]].copy()
+
+            keep_cols = ["selected_text"]
+            if "selected_name" in proc.columns:
+                keep_cols.append("selected_name")
+
+            out = proc[keep_cols].copy()
 
             if "target_domain" in proc.columns:
                 out.insert(0, output_domain_col, proc["target_domain"])
@@ -354,14 +286,17 @@ class Predictor:
             empty_mask = out["selected_text"].fillna("").astype(str).str.strip() == ""
             if empty_mask.any():
                 out.loc[empty_mask, "selected_text"] = _fallback_selected_text(wide.loc[empty_mask])
+
+            if "selected_name" not in out.columns:
+                out["selected_name"] = pd.Series(index = out.index, dtype = "object")
         else:
             out = base[[text_col]].rename(columns = {text_col: "selected_text"}).copy()
             if domain_col in base.columns:
                 out.insert(0, output_domain_col, base[domain_col])
+            out["selected_name"] = pd.Series(index = out.index, dtype = "object")
 
         mask = out["selected_text"].fillna("").astype(str).str.strip() != ""
 
-        out["selected_name"] = pd.Series(index = out.index, dtype = "object")
         out["predicted_label"] = pd.Series(index = out.index, dtype = "object")
         out["predicted_proba"] = pd.Series(np.nan, index = out.index, dtype = "float64")
         out["proba_pseudo"] = pd.Series(np.nan, index = out.index, dtype = "float64")
@@ -386,16 +321,6 @@ class Predictor:
                 pred_ix = np.array([cls_to_ix[c] for c in preds])
                 p_hat = probs[np.arange(len(texts)), pred_ix]
                 out.loc[mask, "proba_pseudo"] = p_hat
-
-        if df_long_for_name is not None and df_long_for_name.shape[0] > 0:
-            out["selected_name"] = out["selected_text"].map(
-                lambda x: _pick_selected_name_from_long(
-                    df_long_for_name,
-                    x,
-                    name_col = "name",
-                    value_col = "content_latest",
-                )
-            )
 
         return out
 
