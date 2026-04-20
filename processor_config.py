@@ -6,7 +6,7 @@ import os
 
 QUEUE_API_KEY = os.getenv("QUEUE_API_KEY", "super-cool-api-key")
 QUEUE_URL = os.getenv("QUEUE_URL", "http://100.98.79.5:4949/exchange-batch")
-QUEUE_KEY = os.getenv("QUEUE_KEY", "META_TAGS")
+QUEUE_KEY = os.getenv("QUEUE_KEY", "META_TAGS_CLASSIFIER")
 
 print(f"Using queue URL: {QUEUE_URL}")
 print(f"Using queue key: {QUEUE_KEY}")
