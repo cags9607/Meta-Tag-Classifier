@@ -33,8 +33,10 @@ from __future__ import annotations
 
 import logging
 import time
+import math
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 from core import MetaTagTemplateClassifier
@@ -48,6 +50,45 @@ logger = logging.getLogger(__name__)
 classifier: Optional[MetaTagTemplateClassifier] = None
 
 PREDICTION_INPUT_TAGS = {"title", "description", "og:title", "og:description"}
+
+
+def safe_scalar(x: Any) -> Any:
+    if x is None:
+        return None
+
+    try:
+        if pd.isna(x):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(x, np.integer):
+        return int(x)
+
+    if isinstance(x, np.floating):
+        x = float(x)
+        if math.isnan(x) or math.isinf(x):
+            return None
+        return x
+
+    if isinstance(x, float):
+        if math.isnan(x) or math.isinf(x):
+            return None
+        return x
+
+    if isinstance(x, pd.Timestamp):
+        return x.isoformat()
+
+    if isinstance(x, list):
+        return [safe_scalar(v) for v in x]
+
+    if isinstance(x, dict):
+        return {k: safe_scalar(v) for k, v in x.items()}
+
+    if isinstance(x, (str, int, bool)):
+        return x
+
+    return str(x)
 
 
 def _extract_rows(job_data: Any) -> List[Dict[str, Any]]:
@@ -120,14 +161,14 @@ def _job_to_result_row(df_rows: pd.DataFrame, pred_row: Dict[str, Any]) -> Dict[
     first_row = df_rows.iloc[0]
 
     return {
-        "session_id": first_row["session_id"],
-        "target_url": first_row["target_domain"],
-        "name": pred_row.get("selected_name"),
-        "selected_text": pred_row.get("selected_text"),
-        "predicted_label": pred_row.get("predicted_label"),
-        "predicted_proba": pred_row.get("predicted_proba"),
-        "proba_pseudo": pred_row.get("proba_pseudo"),
-        "timestamp": first_row["timestamp"],
+        "session_id": safe_scalar(first_row["session_id"]),
+        "target_url": safe_scalar(first_row["target_domain"]),
+        "name": safe_scalar(pred_row.get("selected_name")),
+        "selected_text": safe_scalar(pred_row.get("selected_text")),
+        "predicted_label": safe_scalar(pred_row.get("predicted_label")),
+        "predicted_proba": safe_scalar(pred_row.get("predicted_proba")),
+        "proba_pseudo": safe_scalar(pred_row.get("proba_pseudo")),
+        "timestamp": safe_scalar(first_row["timestamp"]),
     }
 
 
@@ -184,6 +225,8 @@ def process_batch(batch_size: int = 1):
             "results": results,
         }
     ]
+
+    processed_jobs = safe_scalar(processed_jobs)
 
     push(processed_jobs)
     logger.info(f"Pushed {len(results)} result rows for {n_jobs} jobs")
