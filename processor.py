@@ -32,8 +32,8 @@ Output rows:
 from __future__ import annotations
 
 import logging
-import time
 import math
+import time
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -98,9 +98,11 @@ def _extract_rows(job_data: Any) -> List[Dict[str, Any]]:
     if isinstance(job_data, dict):
         for key in ["rows", "meta_tags", "tags"]:
             rows = job_data.get(key)
+
             if rows is not None:
                 if not isinstance(rows, list):
                     raise TypeError(f"job['data']['{key}'] must be a list")
+
                 return rows
 
         if {"session_id", "target_domain", "name", "content", "timestamp"}.issubset(job_data.keys()):
@@ -120,10 +122,12 @@ def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     rename_map = {
         "content_latest": "content",
     }
+
     df = df.rename(columns = {k: v for k, v in rename_map.items() if k in df.columns})
 
     required = ["session_id", "target_domain", "name", "content", "timestamp"]
     missing = [c for c in required if c not in df.columns]
+
     if missing:
         raise KeyError(f"missing_columns:{','.join(missing)}")
 
@@ -138,13 +142,16 @@ def _normalize_rows(rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return df
 
 
-def _build_prediction_input(df_rows: pd.DataFrame) -> pd.DataFrame:
+def _build_prediction_input(df_rows: pd.DataFrame, prediction_id: str) -> pd.DataFrame:
     if df_rows.shape[0] == 0:
-        return pd.DataFrame(columns = ["target_domain", "name", "content_latest"])
+        return pd.DataFrame(columns = ["_prediction_id", "target_domain", "name", "content_latest"])
 
     pred_df = (
         df_rows
-        .loc[lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS), ["target_domain", "name_norm", "content"]]
+        .loc[
+            lambda x: x["name_norm"].isin(PREDICTION_INPUT_TAGS),
+            ["target_domain", "name_norm", "content"],
+        ]
         .copy()
         .rename(columns = {
             "name_norm": "name",
@@ -154,7 +161,9 @@ def _build_prediction_input(df_rows: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop = True)
     )
 
-    return pred_df
+    pred_df["_prediction_id"] = prediction_id
+
+    return pred_df[["_prediction_id", "target_domain", "name", "content_latest"]]
 
 
 def _job_to_result_row(df_rows: pd.DataFrame, pred_row: Dict[str, Any]) -> Dict[str, Any]:
@@ -172,7 +181,7 @@ def _job_to_result_row(df_rows: pd.DataFrame, pred_row: Dict[str, Any]) -> Dict[
     }
 
 
-def process_batch(batch_size: int = 1):
+def process_batch(batch_size: int = BATCH_SIZE):
     global classifier
 
     if classifier is None:
@@ -188,11 +197,14 @@ def process_batch(batch_size: int = 1):
         time.sleep(EMPTY_QUEUE_SLEEP_SECONDS)
         return
 
-    logger.info(f"Processing {n_jobs} jobs")
+    logger.info(f"Processing {n_jobs} queue jobs")
 
-    results: List[Dict[str, Any]] = []
+    valid_jobs: List[Dict[str, Any]] = []
+    pred_inputs: List[pd.DataFrame] = []
 
-    for job in jobs:
+    for job_ix, job in enumerate(jobs):
+        prediction_id = f"job_{job_ix}"
+
         try:
             rows_raw = _extract_rows(job.get("data", {}))
             df_rows = _normalize_rows(rows_raw)
@@ -201,23 +213,59 @@ def process_batch(batch_size: int = 1):
                 logger.info(f"Job {job.get('id', '')}: no rows found in payload")
                 continue
 
-            pred_input = _build_prediction_input(df_rows)
+            pred_input = _build_prediction_input(df_rows, prediction_id = prediction_id)
+
             if pred_input.shape[0] == 0:
                 logger.info(f"Job {job.get('id', '')}: no classifier-relevant tags were provided")
                 continue
 
-            pred_row = classifier.predict_one_domain(pred_input)
-            if not pred_row:
-                logger.info(f"Job {job.get('id', '')}: empty prediction returned")
-                continue
+            valid_jobs.append({
+                "prediction_id": prediction_id,
+                "job": job,
+                "df_rows": df_rows,
+            })
 
-            results.append(_job_to_result_row(df_rows, pred_row))
+            pred_inputs.append(pred_input)
 
         except Exception as e:
-            logger.error(f"Failed to process job {job.get('id', '')}: {type(e).__name__}: {e}")
+            logger.error(f"Failed to prepare job {job.get('id', '')}: {type(e).__name__}: {e}")
             continue
 
+    results: List[Dict[str, Any]] = []
+
+    if pred_inputs:
+        all_pred_input = pd.concat(pred_inputs, ignore_index = True)
+
+        logger.info(
+            f"Running one batched inference call for "
+            f"{len(valid_jobs)} jobs and {all_pred_input.shape[0]} meta-tag rows"
+        )
+
+        pred_df = classifier.predict_dataframe(
+            all_pred_input,
+            domain_col = "_prediction_id",
+            meta_tag_name = "name",
+            meta_tag_value = "content_latest",
+            output_domain_col = "_prediction_id",
+        )
+
+        pred_by_id = {
+            str(row["_prediction_id"]): row.to_dict()
+            for _, row in pred_df.iterrows()
+        }
+
+        for item in valid_jobs:
+            prediction_id = item["prediction_id"]
+            pred_row = pred_by_id.get(prediction_id)
+
+            if not pred_row:
+                logger.info(f"Job {item['job'].get('id', '')}: empty prediction returned")
+                continue
+
+            results.append(_job_to_result_row(item["df_rows"], pred_row))
+
     filename = f"meta_tag_results_{int(time.time())}.json"
+
     processed_jobs = [
         {
             "jobs": [{"id": job["id"], "token": job["token"]} for job in jobs],
@@ -229,14 +277,16 @@ def process_batch(batch_size: int = 1):
     processed_jobs = safe_scalar(processed_jobs)
 
     push(processed_jobs)
-    logger.info(f"Pushed {len(results)} result rows for {n_jobs} jobs")
+    logger.info(f"Pushed {len(results)} result rows for {n_jobs} queue jobs")
 
 
 def main():
     logger.info("Starting META_TAGS processor...")
+
     while True:
         try:
             process_batch(batch_size = BATCH_SIZE)
+
         except Exception as e:
             logger.error(f"Error in process_batch: {e}")
             time.sleep(5)
