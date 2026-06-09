@@ -185,9 +185,9 @@ def process_batch(batch_size: int = BATCH_SIZE):
     global classifier
 
     if classifier is None:
-        logger.info("Initializing MetaTagTemplateClassifier...")
+        logger.info("Initializing Qwen MetaTagTemplateClassifier...")
         classifier = MetaTagTemplateClassifier(artifacts_dir = ARTIFACTS_DIR)
-        logger.info(f"MetaTagTemplateClassifier initialized successfully (artifacts_dir={ARTIFACTS_DIR})")
+        logger.info(f"Qwen MetaTagTemplateClassifier initialized successfully (artifacts_dir={ARTIFACTS_DIR})")
 
     jobs = pop(batch_size = batch_size)
     n_jobs = len(jobs)

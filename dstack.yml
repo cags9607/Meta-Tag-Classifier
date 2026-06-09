@@ -1,22 +1,31 @@
 type: task
-name: meta-tag-template-classifier
+name: meta-tag-classifier
 
 python: "3.12"
 
 files:
-  - .:/workflow
+  - requirements.txt:/workflow/requirements.txt
+  - processor.py:/workflow/processor.py
+  - processor_config.py:/workflow/processor_config.py
+  - processor_utils.py:/workflow/processor_utils.py
+  - core.py:/workflow/core.py
+  - pyproject.toml:/workflow/pyproject.toml
+  - meta_tag_classifier:/workflow/meta_tag_classifier
 
 spot_policy: auto
 
-max_price: 0.25
+max_price: 0.30
 
 env:
-  - QUEUE_URL=http://100.98.79.5:4949/exchange-batch
-  - QUEUE_API_KEY=your-queue-api-key
-  - QUEUE_KEY=META_TAGS
-  - BATCH_SIZE=30
+  - QUEUE_URL
+  - QUEUE_API_KEY
+  - QUEUE_KEY=META_TAGS_CLASSIFIER
+  - BATCH_SIZE
   - EMPTY_QUEUE_SLEEP_SECONDS=60
-  - ARTIFACTS_DIR=/workflow/meta_tag_classifier/artifacts
+  - ARTIFACTS_DIR=Trinotrotolueno/meta-tag-classifier/template_classifier
+  - INFERENCE_BATCH_SIZE=8
+  - MAX_LENGTH=512
+  - LOAD_IN_4BIT=true
 
 commands:
   - cd /workflow
@@ -24,7 +33,7 @@ commands:
   - python3 processor.py
 
 resources:
-  gpu: 16GB:1
+  gpu: 16GB..24GB:1
 
 idle_duration: 6h
 
