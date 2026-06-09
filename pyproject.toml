@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meta-tag-classifier"
+version = "0.2.0"
+description = "Meta tag template classifier using clean meta-tag preprocessing plus Qwen sequence classification"
+authors = [{ name = "Sergio Carrasco" }]
+requires-python = ">=3.10"
+dependencies = [
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "regex>=2024.5",
+  "tqdm>=4.66",
+  "requests>=2.31",
+  "torch>=2.2",
+  "transformers>=4.44",
+  "accelerate>=0.33",
+  "peft>=0.11",
+  "bitsandbytes>=0.43.1",
+  "sentencepiece>=0.2",
+  "safetensors>=0.4",
+  "huggingface_hub>=0.24",
+]
+
+[project.scripts]
+mtc = "meta_tag_classifier.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+# Find the package whether it's in ./meta_tag_classifier or ./src/meta_tag_classifier
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["meta_tag_classifier*"]
+
+# Ship type hints and packaged model artifacts
+[tool.setuptools.package-data]
+meta_tag_classifier = ["py.typed", "artifacts/*", "artifacts/**/*"]
+
